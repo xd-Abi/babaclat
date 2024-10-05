@@ -17,17 +17,13 @@ use tokio::{io, io::AsyncBufReadExt, select};
 
 use libp2p::{
     futures::StreamExt,
-    gossipsub,
-    identify,
+    gossipsub, identify,
     identity::Keypair,
     mdns,
     multiaddr::{Multiaddr, Protocol},
     noise,
     swarm::{NetworkBehaviour, SwarmEvent},
-    tcp,
-    yamux,
-    PeerId,
-    SwarmBuilder,
+    tcp, yamux, PeerId, SwarmBuilder,
 };
 
 #[derive(NetworkBehaviour)]
@@ -65,7 +61,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .prompt()
         .unwrap();
 
-    println!("{}", "Connecting you to your local internet chats...".white().bold());
+    println!(
+        "{}",
+        "Connecting you to your local internet chats..."
+            .white()
+            .bold()
+    );
 
     let app_dir = dirs::data_local_dir()
         .expect("Could not retrieve app data directory!")
@@ -84,8 +85,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     } else {
         println!("{}", "Generating new identity key...".green().bold());
         let encoded_key = keypair.to_protobuf_encoding().unwrap();
-        let mut file = fs::File::create(&identity_path).expect("Could not create identity key file!");
-        file.write_all(&encoded_key).expect("Could not write identity key file!");
+        let mut file =
+            fs::File::create(&identity_path).expect("Could not create identity key file!");
+        file.write_all(&encoded_key)
+            .expect("Could not write identity key file!");
     }
 
     let peer_id = PeerId::from(keypair.public());
@@ -108,19 +111,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let gossipsub = gossipsub::Behaviour::new(
         gossipsub::MessageAuthenticity::Signed(keypair.clone()),
         gossipsub_config,
-    ).expect("Could not create gossipsub behaviour!");
+    )
+    .expect("Could not create gossipsub behaviour!");
 
     let identify = identify::Behaviour::new(
-        identify::Config::new(
-            "/ipfs/0.1.0".into(),
-            keypair.public(),
-        ).with_agent_version(nickname.clone())
+        identify::Config::new("/ipfs/0.1.0".into(), keypair.public())
+            .with_agent_version(nickname.clone()),
     );
 
-    let mdns = mdns::tokio::Behaviour::new(
-        mdns::Config::default(),
-        keypair.public().to_peer_id(),
-    ).expect("Could not create mdns!");
+    let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), keypair.public().to_peer_id())
+        .expect("Could not create mdns!");
 
     let behaviour = ChatBehaviour {
         gossipsub,
@@ -148,11 +148,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with(Protocol::Udp(0))
         .with(Protocol::QuicV1);
 
-    let address_tcp = Multiaddr::from(listen_address)
-        .with(Protocol::Tcp(0));
+    let address_tcp = Multiaddr::from(listen_address).with(Protocol::Tcp(0));
 
-    swarm.listen_on(address_tcp.clone()).expect("Failed to listen on tcp address.");
-    swarm.listen_on(address_quic.clone()).expect("Failed to listen on quic address.");
+    swarm
+        .listen_on(address_tcp.clone())
+        .expect("Failed to listen on tcp address.");
+    swarm
+        .listen_on(address_quic.clone())
+        .expect("Failed to listen on quic address.");
 
     let mut stdin = io::BufReader::new(io::stdin()).lines();
 
@@ -234,4 +237,3 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 }
-
