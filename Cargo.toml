@@ -10,3 +10,6 @@ inquire = "0.7.5"
 dirs = "5.0.1"
 libp2p = { version = "0.53.2", features = ["tokio","gossipsub", "mdns","tcp", "tls", "dns", "async-std", "noise", "yamux", "websocket", "ping", "macros", "quic", "relay", "request-response", "identify", "ed25519"] }
 tokio = { version = "1.39.2", features = ["full"] }
+serde_json = "1.0.128"
+serde = { version = "1.0.210", features = ["derive"] }
+hex = "0.4.3"

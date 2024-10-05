@@ -1,17 +1,14 @@
-use std::{fs, io};
-use std::io::{BufRead, Write};
-use std::{
-    collections::hash_map::DefaultHasher, error::Error, hash::{Hash, Hasher}, net::IpAddr, path::Path, time::Duration
-};
-
+use std::{fs, collections::hash_map::DefaultHasher, error::Error, hash::{Hash, Hasher}, net::IpAddr, time::Duration};
+use std::collections::HashMap;
 use colored::*;
 use inquire::Text;
+use libp2p::futures::StreamExt;
 use libp2p::identity::Keypair;
 use libp2p::{
-    gossipsub, identify, identity, mdns, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux,  multiaddr::{Multiaddr, Protocol}, PeerId, Swarm, SwarmBuilder
+    gossipsub, identify, mdns, multiaddr::{Multiaddr, Protocol}, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux, PeerId, SwarmBuilder
 };
-use libp2p::futures::StreamExt;
-use tokio::select;
+use tokio::{io, io::AsyncBufReadExt, select};
+use serde::{Deserialize, Serialize};
 
 #[derive(NetworkBehaviour)]
 struct ChatBehaviour {
@@ -54,7 +51,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let identity_path = app_dir.join(".identity");
     let mut keypair = Keypair::generate_ed25519();
-    if identity_path.exists() {
+  /*  if identity_path.exists() {
         println!("{}", "Loading your identity key...".white().bold());
         let bytes = fs::read(&identity_path).expect("Could not read identity key!");
         keypair = Keypair::from_protobuf_encoding(&bytes).unwrap();
@@ -64,8 +61,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let mut file = fs::File::create(&identity_path).expect("Could not create identity key file!");
         file.write_all(&encoded_key).expect("Could not write identity key file!");
     }
-
+*/
     let peer_id = PeerId::from(keypair.public());
+    let mut nicknames: HashMap<PeerId, String> = HashMap::new();
+    nicknames.insert(peer_id, nickname.clone());
+
     let message_id_fn = |message: &gossipsub::Message| {
         let mut s = DefaultHasher::new();
         message.data.hash(&mut s);
@@ -88,7 +88,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         identify::Config::new(
             "/ipfs/0.1.0".into(),
             keypair.public()
-        )
+        ).with_agent_version(nickname.clone())
     );
 
     let mdns = mdns::tokio::Behaviour::new(
@@ -99,7 +99,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let behaviour = ChatBehaviour {
         gossipsub,
         identify,
-        mdns
+        mdns,
     };
 
     let mut swarm = SwarmBuilder::with_existing_identity(keypair)
@@ -128,33 +128,33 @@ async fn main() -> Result<(), Box<dyn Error>> {
     swarm.listen_on(address_tcp.clone()).expect("Failed to listen on tcp address.");
     swarm.listen_on(address_quic.clone()).expect("Failed to listen on quic address.");
 
-    // let mut stdin = io::BufReader::new(io::stdin()).lines();
+    let mut stdin = io::BufReader::new(io::stdin()).lines();
 
     loop {
         select! {
-            event = swarm.select_next_some() => match event {
-                SwarmEvent::NewListenAddr { address, .. } => {
-                    println!("Local node is listening on {address}");
-                },
-                // Prints peer id identify info is being sent to.
-                SwarmEvent::Behaviour(ChatBehaviourEvent::Identify(identify::Event::Sent { peer_id, .. })) => {
-                    println!("Sent identify info to {peer_id:?}")
+            Ok(Some(line)) = stdin.next_line() => {
+                if let Err(e) = swarm
+                    .behaviour_mut().gossipsub
+                    .publish(chat_topic.clone(), line.as_bytes()) {
+                    println!("Publish error: {e:?}");
                 }
-                // Prints out the info received via the identify event
-                SwarmEvent::Behaviour(ChatBehaviourEvent::Identify(identify::Event::Received { info, .. })) => {
-                    println!("Received {info:?}")
-                },
+            }
+            event = swarm.select_next_some() => match event {
+                SwarmEvent::Behaviour(ChatBehaviourEvent::Identify(identify::Event::Received { peer_id, info, .. })) => {
+                    nicknames.insert(peer_id, info.agent_version.clone());
+                    println!("{} joined the chat", info.agent_version);
+                }
                 SwarmEvent::Behaviour(ChatBehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
                     for (peer_id, _multiaddr) in list {
-                        println!("mDNS discovered a new peer: {peer_id}");
                         swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                     }
                 },
-                SwarmEvent::Behaviour(ChatBehaviourEvent::Mdns(mdns::Event::Expired(list))) => {
-                    for (peer_id, _multiaddr) in list {
-                        println!("mDNS discover peer has expired: {peer_id}");
-                        swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
-                    }
+                SwarmEvent::Behaviour(ChatBehaviourEvent::Gossipsub(gossipsub::Event::Message {
+                    propagation_source: _,
+                    message_id: _,
+                    message,
+                })) => {
+                    println!("Received some message");
                 },
                 _ => {}
             }
