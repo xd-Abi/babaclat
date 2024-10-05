@@ -7,3 +7,4 @@ authors = ["Abi"]
 [dependencies]
 colored = "2.0"
 inquire = "0.7.5"
+dirs = "5.0.1"
