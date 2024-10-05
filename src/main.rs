@@ -1,8 +1,15 @@
 use std::fs;
 use std::io::Write;
+use std::{
+    collections::hash_map::DefaultHasher, error::Error, hash::{Hash, Hasher}, net::IpAddr, path::Path, time::Duration
+};
+
 use colored::*;
 use inquire::Text;
 use libp2p::identity::Keypair;
+use libp2p::{
+    gossipsub, identify, identity, mdns, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux,  multiaddr::{Multiaddr, Protocol}, PeerId, Swarm, SwarmBuilder
+};
 
 fn main() {
     let banner = r#"
@@ -21,6 +28,7 @@ fn main() {
 
     let nickname = Text::new(&"Enter a nickname:".white().bold().to_string())
         .with_placeholder("Falcon")
+        .with_default("Falcon")
         .prompt()
         .unwrap();
 
@@ -46,5 +54,49 @@ fn main() {
         let mut file = fs::File::create(&identity_path).expect("Could not create identity key file!");
         file.write_all(&encoded_key).expect("Could not write identity key file!");
     }
+
+    let peer_id = PeerId::from(keypair.public());
+    let message_id_fn = |message: &gossipsub::Message| {
+        let mut s = DefaultHasher::new();
+        message.data.hash(&mut s);
+        gossipsub::MessageId::from(s.finish().to_string())
+    };
+
+    let gossipsub_config = gossipsub::ConfigBuilder::default()
+        .heartbeat_interval(Duration::from_secs(10))
+        .validation_mode(gossipsub::ValidationMode::Strict)
+        .message_id_fn(message_id_fn)
+        .build()
+        .expect("Could not create gossipsub config!");
+
+    let gossipsub = gossipsub::Behaviour::new(
+        gossipsub::MessageAuthenticity::Signed(keypair.clone()),
+        gossipsub_config
+    ).expect("Could not create gossipsub behaviour!");
+
+    let identify = identify::Behaviour::new(
+        identify::Config::new(
+            "/ipfs/0.1.0".into(),
+            keypair.public()
+        )
+    );
+
+    let mdns = mdns::tokio::Behaviour::new(
+        mdns::Config::default(),
+        keypair.public().to_peer_id()
+    ).expect("Could not create mdns!");
+    let behaviour = (gossipsub, identify, mdns);
+
+    let swarm = SwarmBuilder::with_existing_identity(keypair)
+        .with_tokio()
+        .with_tcp(
+            tcp::Config::default(),
+            noise::Config::new,
+            yamux::Config::default,
+        )
+        .with_quic()
+        .with_behaviour(|_| behaviour)?
+        .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(60)))
+        .build();
 }
 
