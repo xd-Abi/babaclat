@@ -1,18 +1,34 @@
-use std::{fs, collections::hash_map::DefaultHasher, error::Error, hash::{Hash, Hasher}, net::IpAddr, time::Duration};
-use std::str;
-use std::collections::HashMap;
-use std::io::stdout;
+use chrono::Utc;
 use colored::*;
+use crossterm::{cursor, execute, terminal};
 use inquire::Text;
-use libp2p::futures::StreamExt;
-use libp2p::identity::Keypair;
-use libp2p::{
-    gossipsub, identify, mdns, multiaddr::{Multiaddr, Protocol}, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux, PeerId, SwarmBuilder,
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::{hash_map::DefaultHasher, HashMap},
+    error::Error,
+    fs,
+    hash::{Hash, Hasher},
+    io::{stdout, Write},
+    net::IpAddr,
+    str,
+    time::Duration,
 };
 use tokio::{io, io::AsyncBufReadExt, select};
-use chrono::Utc;
-use serde::{Deserialize, Serialize};
-use crossterm::{cursor, execute, terminal};
+
+use libp2p::{
+    futures::StreamExt,
+    gossipsub,
+    identify,
+    identity::Keypair,
+    mdns,
+    multiaddr::{Multiaddr, Protocol},
+    noise,
+    swarm::{NetworkBehaviour, SwarmEvent},
+    tcp,
+    yamux,
+    PeerId,
+    SwarmBuilder,
+};
 
 #[derive(NetworkBehaviour)]
 struct ChatBehaviour {
@@ -61,17 +77,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let identity_path = app_dir.join(".identity");
     let mut keypair = Keypair::generate_ed25519();
-    /*  if identity_path.exists() {
-          println!("{}", "Loading your identity key...".white().bold());
-          let bytes = fs::read(&identity_path).expect("Could not read identity key!");
-          keypair = Keypair::from_protobuf_encoding(&bytes).unwrap();
-      } else {
-          println!("{}", "Generating new identity key...".green().bold());
-          let encoded_key = keypair.to_protobuf_encoding().unwrap();
-          let mut file = fs::File::create(&identity_path).expect("Could not create identity key file!");
-          file.write_all(&encoded_key).expect("Could not write identity key file!");
-      }
-  */
+    if identity_path.exists() {
+        println!("{}", "Loading your identity key...".white().bold());
+        let bytes = fs::read(&identity_path).expect("Could not read identity key!");
+        keypair = Keypair::from_protobuf_encoding(&bytes).unwrap();
+    } else {
+        println!("{}", "Generating new identity key...".green().bold());
+        let encoded_key = keypair.to_protobuf_encoding().unwrap();
+        let mut file = fs::File::create(&identity_path).expect("Could not create identity key file!");
+        file.write_all(&encoded_key).expect("Could not write identity key file!");
+    }
+
     let peer_id = PeerId::from(keypair.public());
     let mut nicknames: HashMap<PeerId, String> = HashMap::new();
     nicknames.insert(peer_id, nickname.clone());
@@ -161,7 +177,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     let formatted_message = line.white().bold();
                     println!("{}: {}", formatted_sender, formatted_message);
 
-                    if let Err(e) = swarm
+                    if let Err(_e) = swarm
                         .behaviour_mut().gossipsub
                         .publish(chat_topic.clone(), message.as_bytes()) {
                         println!("{}", "Could not send message".red().bold());
