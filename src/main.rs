@@ -180,7 +180,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     if let Err(_e) = swarm
                         .behaviour_mut().gossipsub
                         .publish(chat_topic.clone(), message.as_bytes()) {
-                        println!("{}", "Could not send message".red().bold());
+
+                        execute!(
+                            stdout(),
+                            cursor::MoveUp(1),
+                            terminal::Clear(terminal::ClearType::CurrentLine)
+                        ).unwrap();
+
+                        let formatted_error = format!("<{} (You)> {} - Could not send message", nickname, line).red().bold();
+                        println!("{}", formatted_error);
                     }
                 }
             }
