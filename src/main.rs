@@ -11,7 +11,15 @@ use libp2p::{
     gossipsub, identify, identity, mdns, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux,  multiaddr::{Multiaddr, Protocol}, PeerId, Swarm, SwarmBuilder
 };
 
-fn main() {
+#[derive(NetworkBehaviour)]
+struct ChatBehaviour {
+    identify: identify::Behaviour,
+    gossipsub: gossipsub::Behaviour,
+    mdns: mdns::tokio::Behaviour,
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     let banner = r#"
 
 ███╗      ███╗    ██████╗  █████╗ ██████╗  █████╗  ██████╗██╗      █████╗ ████████╗
@@ -85,18 +93,38 @@ fn main() {
         mdns::Config::default(),
         keypair.public().to_peer_id()
     ).expect("Could not create mdns!");
-    let behaviour = (gossipsub, identify, mdns);
 
-    let swarm = SwarmBuilder::with_existing_identity(keypair)
+    let behaviour = ChatBehaviour {
+        gossipsub,
+        identify,
+        mdns
+    };
+
+    let mut swarm = SwarmBuilder::with_existing_identity(keypair)
         .with_tokio()
         .with_tcp(
             tcp::Config::default(),
             noise::Config::new,
             yamux::Config::default,
-        )
+        )?
         .with_quic()
         .with_behaviour(|_| behaviour)?
         .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(60)))
         .build();
+
+    let chat_topic = gossipsub::IdentTopic::new("babaclat-chat");
+    swarm.behaviour_mut().gossipsub.subscribe(&chat_topic)?;
+
+    let listen_address: IpAddr = "0.0.0.0".parse().expect("Invalid IP address!");
+    let address_quic = Multiaddr::from(listen_address)
+        .with(Protocol::Udp(0))
+        .with(Protocol::QuicV1);
+
+    let address_tcp = Multiaddr::from(listen_address)
+        .with(Protocol::Tcp(0));
+
+    swarm.listen_on(address_tcp.clone()).expect("Failed to listen on tcp address.");
+    swarm.listen_on(address_quic.clone()).expect("Failed to listen on quic address.");
+    Ok(())
 }
 
