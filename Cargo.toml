@@ -3,6 +3,7 @@ name = "Babaclat"
 version = "0.1.0"
 edition = "2021"
 authors = ["Abi"]
+build = "build.rs"
 
 [dependencies]
 colored = "2.0"
@@ -15,3 +16,6 @@ serde = { version = "1.0.210", features = ["derive"] }
 hex = "0.4.3"
 chrono = "0.4.38"
 crossterm = "0.28.1"
+
+[build-dependencies]
+embed-resource = "2.4"
