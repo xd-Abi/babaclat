@@ -1,5 +1,5 @@
-use std::fs;
-use std::io::Write;
+use std::{fs, io};
+use std::io::{BufRead, Write};
 use std::{
     collections::hash_map::DefaultHasher, error::Error, hash::{Hash, Hasher}, net::IpAddr, path::Path, time::Duration
 };
@@ -10,6 +10,8 @@ use libp2p::identity::Keypair;
 use libp2p::{
     gossipsub, identify, identity, mdns, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux,  multiaddr::{Multiaddr, Protocol}, PeerId, Swarm, SwarmBuilder
 };
+use libp2p::futures::StreamExt;
+use tokio::select;
 
 #[derive(NetworkBehaviour)]
 struct ChatBehaviour {
@@ -125,6 +127,38 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     swarm.listen_on(address_tcp.clone()).expect("Failed to listen on tcp address.");
     swarm.listen_on(address_quic.clone()).expect("Failed to listen on quic address.");
-    Ok(())
+
+    // let mut stdin = io::BufReader::new(io::stdin()).lines();
+
+    loop {
+        select! {
+            event = swarm.select_next_some() => match event {
+                SwarmEvent::NewListenAddr { address, .. } => {
+                    println!("Local node is listening on {address}");
+                },
+                // Prints peer id identify info is being sent to.
+                SwarmEvent::Behaviour(ChatBehaviourEvent::Identify(identify::Event::Sent { peer_id, .. })) => {
+                    println!("Sent identify info to {peer_id:?}")
+                }
+                // Prints out the info received via the identify event
+                SwarmEvent::Behaviour(ChatBehaviourEvent::Identify(identify::Event::Received { info, .. })) => {
+                    println!("Received {info:?}")
+                },
+                SwarmEvent::Behaviour(ChatBehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
+                    for (peer_id, _multiaddr) in list {
+                        println!("mDNS discovered a new peer: {peer_id}");
+                        swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                    }
+                },
+                SwarmEvent::Behaviour(ChatBehaviourEvent::Mdns(mdns::Event::Expired(list))) => {
+                    for (peer_id, _multiaddr) in list {
+                        println!("mDNS discover peer has expired: {peer_id}");
+                        swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
+                    }
+                },
+                _ => {}
+            }
+        }
+    }
 }
 
