@@ -5,10 +5,9 @@ use inquire::Text;
 use libp2p::futures::StreamExt;
 use libp2p::identity::Keypair;
 use libp2p::{
-    gossipsub, identify, mdns, multiaddr::{Multiaddr, Protocol}, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux, PeerId, SwarmBuilder
+    gossipsub, identify, mdns, multiaddr::{Multiaddr, Protocol}, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux, PeerId, SwarmBuilder,
 };
 use tokio::{io, io::AsyncBufReadExt, select};
-use serde::{Deserialize, Serialize};
 
 #[derive(NetworkBehaviour)]
 struct ChatBehaviour {
@@ -51,17 +50,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let identity_path = app_dir.join(".identity");
     let mut keypair = Keypair::generate_ed25519();
-  /*  if identity_path.exists() {
-        println!("{}", "Loading your identity key...".white().bold());
-        let bytes = fs::read(&identity_path).expect("Could not read identity key!");
-        keypair = Keypair::from_protobuf_encoding(&bytes).unwrap();
-    } else {
-        println!("{}", "Generating new identity key...".green().bold());
-        let encoded_key = keypair.to_protobuf_encoding().unwrap();
-        let mut file = fs::File::create(&identity_path).expect("Could not create identity key file!");
-        file.write_all(&encoded_key).expect("Could not write identity key file!");
-    }
-*/
+    /*  if identity_path.exists() {
+          println!("{}", "Loading your identity key...".white().bold());
+          let bytes = fs::read(&identity_path).expect("Could not read identity key!");
+          keypair = Keypair::from_protobuf_encoding(&bytes).unwrap();
+      } else {
+          println!("{}", "Generating new identity key...".green().bold());
+          let encoded_key = keypair.to_protobuf_encoding().unwrap();
+          let mut file = fs::File::create(&identity_path).expect("Could not create identity key file!");
+          file.write_all(&encoded_key).expect("Could not write identity key file!");
+      }
+  */
     let peer_id = PeerId::from(keypair.public());
     let mut nicknames: HashMap<PeerId, String> = HashMap::new();
     nicknames.insert(peer_id, nickname.clone());
@@ -81,19 +80,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let gossipsub = gossipsub::Behaviour::new(
         gossipsub::MessageAuthenticity::Signed(keypair.clone()),
-        gossipsub_config
+        gossipsub_config,
     ).expect("Could not create gossipsub behaviour!");
 
     let identify = identify::Behaviour::new(
         identify::Config::new(
             "/ipfs/0.1.0".into(),
-            keypair.public()
+            keypair.public(),
         ).with_agent_version(nickname.clone())
     );
 
     let mdns = mdns::tokio::Behaviour::new(
         mdns::Config::default(),
-        keypair.public().to_peer_id()
+        keypair.public().to_peer_id(),
     ).expect("Could not create mdns!");
 
     let behaviour = ChatBehaviour {
@@ -144,9 +143,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     nicknames.insert(peer_id, info.agent_version.clone());
                     println!("{} joined the chat", info.agent_version);
                 }
+                SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
+                    if let Some(error) = cause {
+                       let error_string = format!("{:?}", error);
+                        if error_string.contains("code: 10054") {
+                            if let Some(nickname) = nicknames.get(&peer_id) {
+                                println!("{} left the chat", nickname);
+                            }
+                        }
+                    }
+                }
                 SwarmEvent::Behaviour(ChatBehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
                     for (peer_id, _multiaddr) in list {
                         swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                    }
+                },
+                SwarmEvent::Behaviour(ChatBehaviourEvent::Mdns(mdns::Event::Expired(list))) => {
+                    for (peer_id, _multiaddr) in list {
+
+                        if let Some(nickname) = nicknames.remove(&peer_id) {
+                            println!("{} left the chat.", nickname);
+                        }
+
+                        println!("SOMETHING HAPPEND");
+                        swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
                     }
                 },
                 SwarmEvent::Behaviour(ChatBehaviourEvent::Gossipsub(gossipsub::Event::Message {
