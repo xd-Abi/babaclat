@@ -1,5 +1,7 @@
 use std::{fs, collections::hash_map::DefaultHasher, error::Error, hash::{Hash, Hasher}, net::IpAddr, time::Duration};
+use std::str;
 use std::collections::HashMap;
+use std::io::stdout;
 use colored::*;
 use inquire::Text;
 use libp2p::futures::StreamExt;
@@ -8,12 +10,21 @@ use libp2p::{
     gossipsub, identify, mdns, multiaddr::{Multiaddr, Protocol}, noise, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux, PeerId, SwarmBuilder,
 };
 use tokio::{io, io::AsyncBufReadExt, select};
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use crossterm::{cursor, execute, terminal};
 
 #[derive(NetworkBehaviour)]
 struct ChatBehaviour {
     identify: identify::Behaviour,
     gossipsub: gossipsub::Behaviour,
     mdns: mdns::tokio::Behaviour,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ChatMessage {
+    content: String,
+    timestamp: String,
 }
 
 #[tokio::main]
@@ -132,23 +143,44 @@ async fn main() -> Result<(), Box<dyn Error>> {
     loop {
         select! {
             Ok(Some(line)) = stdin.next_line() => {
-                if let Err(e) = swarm
-                    .behaviour_mut().gossipsub
-                    .publish(chat_topic.clone(), line.as_bytes()) {
-                    println!("Publish error: {e:?}");
+                if !line.trim().is_empty() {
+                    let message_json = ChatMessage {
+                        content: line.clone(),
+                        timestamp: Utc::now().to_rfc3339(),
+                    };
+
+                    let message = serde_json::to_string(&message_json).unwrap();
+
+                    execute!(
+                        stdout(),
+                        cursor::MoveUp(1),
+                        terminal::Clear(terminal::ClearType::CurrentLine)
+                    ).unwrap();
+
+                    let formatted_sender = format!("<{} (You)>", nickname).bright_cyan().bold();
+                    let formatted_message = line.white().bold();
+                    println!("{}: {}", formatted_sender, formatted_message);
+
+                    if let Err(e) = swarm
+                        .behaviour_mut().gossipsub
+                        .publish(chat_topic.clone(), message.as_bytes()) {
+                        println!("{}", "Could not send message".red().bold());
+                    }
                 }
             }
             event = swarm.select_next_some() => match event {
                 SwarmEvent::Behaviour(ChatBehaviourEvent::Identify(identify::Event::Received { peer_id, info, .. })) => {
                     nicknames.insert(peer_id, info.agent_version.clone());
-                    println!("{} joined the chat", info.agent_version);
+                    let message = format!("{} joined the chat", info.agent_version).yellow().bold();
+                    println!("{}", message);
                 }
                 SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
                     if let Some(error) = cause {
                        let error_string = format!("{:?}", error);
                         if error_string.contains("code: 10054") {
-                            if let Some(nickname) = nicknames.get(&peer_id) {
-                                println!("{} left the chat", nickname);
+                            if let Some(person) = nicknames.get(&peer_id) {
+                               let message = format!("{} left the chat", person).yellow().bold();
+                               println!("{}", message);
                             }
                         }
                     }
@@ -158,23 +190,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                     }
                 },
-                SwarmEvent::Behaviour(ChatBehaviourEvent::Mdns(mdns::Event::Expired(list))) => {
-                    for (peer_id, _multiaddr) in list {
-
-                        if let Some(nickname) = nicknames.remove(&peer_id) {
-                            println!("{} left the chat.", nickname);
-                        }
-
-                        println!("SOMETHING HAPPEND");
-                        swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
-                    }
-                },
                 SwarmEvent::Behaviour(ChatBehaviourEvent::Gossipsub(gossipsub::Event::Message {
-                    propagation_source: _,
+                    propagation_source,
                     message_id: _,
                     message,
                 })) => {
-                    println!("Received some message");
+                    if let Ok(message_str) = str::from_utf8(&message.data) {
+                        if let Ok(parsed_message) = serde_json::from_str::<ChatMessage>(message_str) {
+                            let sender = nicknames.get(&propagation_source).unwrap();
+                            let formatted_sender = format!("<{}>", sender).bright_green().bold();
+                            let formatted_message = parsed_message.content.white().bold();
+
+                            println!("{} {}", formatted_sender, formatted_message);
+                        }
+                    }
                 },
                 _ => {}
             }
